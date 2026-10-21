@@ -296,6 +296,12 @@ FMT_PRAGMA_GCC(diagnostic push)
 #  define FMT_BUILTIN_TYPES 1
 #endif
 
+// FMT_DISALLOW_POINTERS=1 makes formatting of any pointer, including void
+// pointers, nullptr and the result of fmt::ptr, a compile-time error.
+#ifndef FMT_DISALLOW_POINTERS
+#  define FMT_DISALLOW_POINTERS 0
+#endif
+
 #define FMT_APPLY_VARIADIC(expr) \
   using unused = int[];          \
   (void)unused { 0, (expr, 0)... }
@@ -1214,13 +1220,16 @@ template <typename Char> struct type_mapper {
   static auto map(const T&) -> conditional_t<std::is_same<C, Char>::value,
                                              basic_string_view<C>, void>;
 
+#if !FMT_DISALLOW_POINTERS
   static auto map(void*) -> const void*;
   static auto map(const void*) -> const void*;
   static auto map(volatile void*) -> const void*;
   static auto map(const volatile void*) -> const void*;
   static auto map(nullptr_t) -> const void*;
+#endif
   template <typename T, FMT_ENABLE_IF(std::is_pointer<T>::value ||
-                                      std::is_member_pointer<T>::value)>
+                                      std::is_member_pointer<T>::value ||
+                                      std::is_same<T, nullptr_t>::value)>
   static auto map(const T&) -> void;
 
   template <typename T, FMT_ENABLE_IF(use_format_as<T>::value)>
@@ -2252,6 +2261,15 @@ template <typename Context> class value {
     string.data = sv.data();
     string.size = sv.size();
   }
+#if FMT_DISALLOW_POINTERS
+  template <typename T, FMT_ENABLE_IF(std::is_pointer<T>::value ||
+                                      std::is_member_pointer<T>::value ||
+                                      std::is_same<T, nullptr_t>::value)>
+  value(const T&) {
+    // Formatting of pointers is disabled with FMT_DISALLOW_POINTERS.
+    static_assert(sizeof(T) == 0, "formatting of pointers is disallowed");
+  }
+#else
   FMT_INLINE value(void* x FMT_BUILTIN) : pointer(x) {}
   FMT_INLINE value(const void* x FMT_BUILTIN) : pointer(x) {}
   FMT_INLINE value(volatile void* x FMT_BUILTIN)
@@ -2269,6 +2287,7 @@ template <typename Context> class value {
     static_assert(sizeof(T) == 0,
                   "formatting of non-void pointers is disallowed");
   }
+#endif
 
   template <typename T, FMT_ENABLE_IF(use_format_as<T>::value)>
   value(const T& x) : value(format_as(x)) {}
